@@ -1,0 +1,43 @@
+Borough,Neighborhood,AccidentCount,Accident_Index
+Bronx,Bronx Park and Fordham,12150,2.728442497
+Bronx,Central Bronx,10827,2.431345425
+Bronx,High Bridge and Morrisania,9470,2.126613206
+Bronx,Hunts Point and Mott Haven,9683,2.174445161
+Bronx,Kingsbridge and Riverdale,2673,0.600257349
+Bronx,Northeast Bronx,11262,2.529030404
+Bronx,Southeast Bronx,12432,2.791769311
+Brooklyn,Borough Park,15249,3.424363756
+Brooklyn,Bushwick and Williamsburg,12934,2.904500021
+Brooklyn,Canarsie and Flatlands,13691,3.07449434
+Brooklyn,Central Brooklyn,27274,6.124735858
+Brooklyn,East New York and New Lots,18101,4.064817913
+Brooklyn,Flatbush,24616,5.527846956
+Brooklyn,Greenpoint,6445,1.447309621
+Brooklyn,Northwest Brooklyn,14102,3.166789802
+Brooklyn,Southern Brooklyn,12649,2.840499518
+Brooklyn,Southwest Brooklyn,7677,1.723971445
+Brooklyn,Sunset Park,6520,1.464151859
+Manhattan,Central Harlem,7778,1.746652325
+Manhattan,Chelsea and Clinton,13405,3.010269274
+Manhattan,East Harlem,6184,1.388698634
+Manhattan,Gramercy Park and Murray Hill,12416,2.7881763
+Manhattan,Greenwich Village and Soho,6002,1.347828137
+Manhattan,Inwood and Washington Heights,7852,1.763269999
+Manhattan,Lower East Side,9042,2.03050017
+Manhattan,Lower Manhattan,2784,0.625183861
+Manhattan,Upper East Side,6011,1.349849206
+Manhattan,Upper West Side,5182,1.163686339
+Queens,Central Queens,4054,0.910379085
+Queens,Jamaica,22416,5.033807985
+Queens,North Queens,10921,2.452454363
+Queens,Northeast Queens,3406,0.764862152
+Queens,Northwest Queens,12361,2.775825326
+Queens,Rockaways,4641,1.042197665
+Queens,Southeast Queens,16148,3.626246045
+Queens,Southwest Queens,16338,3.668913047
+Queens,West Central Queens,10235,2.29840403
+Queens,West Queens,20513,4.606464275
+Staten Island,Mid-Island,1754,0.393883798
+Staten Island,Port Richmond,2216,0.497631981
+Staten Island,South Shore,8552,1.920464217
+Staten Island,Stapleton and St. George,7343,1.648967346
