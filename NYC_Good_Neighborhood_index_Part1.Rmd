@@ -1,0 +1,762 @@
+---
+title: "NYC_Neighborhood_index"
+author: "Meghana, Sohil, Ujjwal, Vigya"
+date: "25 May 2018"
+output:
+  html_document:
+    keep_md: true
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+
+opts_chunk$set(fig.path="images/",
+               cache.path="cache/",
+            #   dev=c("png","pdf"),
+            #  fig.width=5,
+            #  fig.height=4.5,
+            #  dpi=300,
+            #  fig.show="hold",
+            #  fig.lp="fig:",
+               cache=TRUE,
+            #  par=TRUE,
+               echo=TRUE,
+               message=FALSE,
+               warning=FALSE)
+```
+
+
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(ggthemes)
+library(tm)
+library(tidytext)
+library(knitr)
+library(dplyr)
+library(spdplyr)
+library(leaflet)
+library(lubridate)
+library(plotly)
+library(shiny)
+library(treemapify)
+library(geojsonio)
+library(readr)
+library(sqldf)
+library(RColorBrewer)
+library(rgeos)
+library(maptools)
+library(waffle)
+library(rvest)
+library(quanteda)
+library(reshape)
+library(devtools)
+library(curl)
+library(readxl)
+library(gridExtra)
+library(manipulateWidget)
+library(DT)
+library(maps)
+library(fossil)
+library(geosphere)
+library(stringr)
+library(stringi) 
+#library(plotrix)
+library(ggrepel)       
+#library(svgPanZoom)  
+library(raster)
+library(ggridges)
+
+accidents <- read.csv("data/NYPD_Motor_Vehicle_Collisions.csv", stringsAsFactors = FALSE)
+
+service_requests <- read.csv("data/service_requests.csv", stringsAsFactors = FALSE)
+
+zipcode <- read.csv("data/Zip_Neighborhood.csv", stringsAsFactors = FALSE)
+
+restaurants<- read.csv("data/NYC_restaurants_by_type.csv", stringsAsFactors = FALSE)
+
+hospitals<- read.csv("data/NYC_Health_and_Hospitals_Corporation_Facilities.csv")
+
+school <- shapefile("data/Public_Schools_Points_2011-2012A.shp")
+
+mta<- read.csv("data/subways_zip.csv")
+
+crime_data <- read.csv("data/crime.csv")
+
+```
+
+## Introduction
+If you are looking to buy a new house or want to move to better neighborhood, we can help you making an informed decision. Our Aim with this project is to rank all 42 NYC Neighborhoods on the basis of Safety, Hygiene, Road Sense and Other amenities such as schools, hospitals, subways etc. 
+
+The Project is divided into two parts. 
+
+- In the first part we want  to show you interesting insights from NYC crime, 311 calls, NYC motor vehicle and 4 more datasets so that user can know what to expect from this Magnificent City. 
+
+- The second part deals with user preference, we have designed a shiny app through which user can rate his preference with factors like Crime, Hygiene, Road sense and other amenities. 
+
+##NYC: Vehicle Collison Analysis
+###1. Which time of the day recorded most number of casualties?
+We found out that most accidents accross all boroughs occur during 4 to 6 pm, a small peak is also observed during 8 to 9 am. Which signifies most accidents occur during office going hours.
+```{r}
+
+thehood <- merge(x= accidents,y = zipcode, by.x = "ZIP.CODE", by.y = "Zipcode" ,all = FALSE)
+
+thehood<- thehood%>%
+  mutate(sum = rowSums(.[11:18]))
+
+a <- hms(as.character(thehood$TIME))
+
+thehood$hour <- hour(a)
+
+accitime <-  thehood%>% group_by(BOROUGH,hour) %>%
+  summarise(n = sum(sum))
+
+timeplot<-ggplot(accitime, aes(x=hour, y=n)) +
+  geom_line(size = 1.2,aes(color = BOROUGH), show.legend = TRUE)+
+  scale_colour_manual(values = c("#43a2ca", "#31a354", "#f03b20", "#fdae6b","#8856a7"))+
+  ylab("Number of casualties")+
+  xlab("Hour of the Day")+
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),axis.text.x = element_text(angle=90, size=rel(1), hjust=1))+ ggtitle("Accident time trend in NYC ")
+
+timeplot
+```
+
+###2. Neighborhoods with most casualities.
+We found that most number of accidents occur in brooklyn and that too in Central Brooklyn Neighborhood, which is quite understandable as Brooklyn has the maximum population with 3.4 million people.
+```{r}
+total<-  thehood%>% group_by(Neighborhood, Borough) %>%
+  summarise(n = sum(sum))
+
+totalplot <- 
+  ggplot(total, aes(x= reorder(Neighborhood, -n), y = n, fill = Borough)) +
+  geom_bar(stat = "identity", show.legend = F) +
+  facet_wrap(~Borough, nrow = 1, scales = "free_x")+
+  scale_fill_manual(values = c("#43a2ca", "#31a354", "#f03b20", "#fdae6b","#8856a7")) +
+  xlab("") + 
+  ylab("Total number of casualties") +
+  ggtitle("Casualties distribution per Borough") +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),axis.text.x = element_text(angle=90, size=rel(0.8), hjust=1))
+
+totalplot
+```
+
+###3. Map of NYC Neighborhood wise casualties distribution .
+Neighborhood with more casualties are marked in red and with les are marked in green. The Neighborhood with casualties are makred in Grey.
+```{r}
+totalzip<-  thehood%>% group_by(ZIP.CODE) %>%
+  summarise(n = sum(sum))
+
+
+library(geojsonio)
+s <- geojson_read("data/nyu_2451_34509-geojson.json", what = "sp", string)
+s@data <- left_join(s@data %>% mutate(ZIP.CODE = as.numeric(as.character(zcta))),
+                      thehood %>%
+                        group_by(ZIP.CODE) %>%
+                        summarize(Num_of_Casualties = as.numeric(sum(sum))),
+                      by = "ZIP.CODE")
+
+s_labels <- paste("<b>Zip Code:</b>",s$ZIP.CODE,"<br/>",
+                    "<b>No. of Casualties:</b>", s$Num_of_Casualties,"<br/>")
+
+themap <- leaflet(thehood, options = leafletOptions(minZoom = 10)) %>%
+  addTiles(paste0("https://{s}.tile.thunderforest.com/pioneer/{z}/{x}/{y}.png?",
+                  "apikey=", Sys.getenv("THUNDERFOREST_API_KEY")),
+           options = tileOptions(opacity = 1), group = "Base") %>%
+  setView(-73.997103, 40.731030, zoom = 11) %>%
+  addPolygons(data = s, stroke = TRUE, smoothFactor = 0.2,
+              weight=1, color='#333333', opacity=1,
+              fillColor = ~colorQuantile("RdYlGn", Num_of_Casualties, reverse = TRUE)(Num_of_Casualties), 
+              fillOpacity = 0.5,
+              popup = s_labels) %>%
+  addLegend("topleft",
+            pal = colorNumeric("RdYlGn", s$Num_of_Casualties, reverse = TRUE), 
+            values = ~s$Num_of_Casualties,
+            title = "Num of Casualties",
+            opacity = 1)
+
+themap
+```
+###4. Major Causes of Accident.
+We found out following as the major causes of accidents. 
+Driver Distraction, Failure to Yield Right of Way and Traffic Disregarded
+```{r}
+major_cause <- thehood %>% filter(thehood$CONTRIBUTING.FACTOR.VEHICLE.1 != "Unspecified")%>%filter(!is.na(CONTRIBUTING.FACTOR.VEHICLE.1))
+
+major_cause1<-  major_cause%>% group_by(CONTRIBUTING.FACTOR.VEHICLE.1) %>%
+  summarise(n = sum(sum))
+
+top3_major_cause <- major_cause1%>%
+  top_n(n = 3, wt = n)
+
+library(waffle)
+
+total_major_cause1 <- sum(major_cause1$n)
+
+driver_count <- major_cause1$n[major_cause1$CONTRIBUTING.FACTOR.VEHICLE.1=="Driver Inattention/Distraction"]
+failure_count <- major_cause1$n[major_cause1$CONTRIBUTING.FACTOR.VEHICLE.1=="Failure to Yield Right-of-Way"]
+traffic_count <- major_cause1$n[major_cause1$CONTRIBUTING.FACTOR.VEHICLE.1=="Traffic Control Disregarded"]
+
+non_top3_count <- total_major_cause1 - driver_count - failure_count - traffic_count
+
+totalcount <- c(driver_count,failure_count,traffic_count,non_top3_count)
+
+totalcount <- totalcount/1000
+names(totalcount) <- c("Driver Distraction","Failure to Yield Right-of-Way","Traffic Disregarded","All other causes")
+waffle(totalcount, rows=,size=1,legend_pos = "top",
+       title="Distribution of Major Causes of Accidents in NYC\nOne square = 1000 counts",
+       colors=c("#f03b20", "#feb24c", "#ffeda0","#c7d4b6"))
+```
+
+
+```{r}
+finaldf<-  thehood%>% group_by(Borough, Neighborhood) %>%
+  summarise(n = sum(sum))
+
+total1 <- thehood%>%
+  summarise(n = sum(sum))
+finaldf$percentage <- (finaldf$n/total1$n)*100
+
+colnames(finaldf)[3] <- "AccidentCount"
+colnames(finaldf)[4] <- "AccidentPercentage"
+```
+ 
+
+```{r message=FALSE, warning=FALSE}
+
+#Data Wrangling for crime data
+crime_filter <- crime_data[,c(1,2,3,8,12,14,17,22,23)]
+#Function to get right of the date to get the year
+substrRight <- function(x, n){
+  substr(x, nchar(x)- n+1 , nchar(x))
+}
+
+
+dates <- strptime(as.character(crime_filter$CMPLNT_FR_DT),format="%m/%d/%Y")
+crime_filter$year <- format(dates, "%Y")
+
+crime_data_filter <- crime_filter[ which( crime_filter$year=='2013' | crime_filter$year=='2014' | crime_filter$year=='2015' | crime_filter$year=='2016' | crime_filter$year=='2017'| crime_filter$year=='2018'),]
+
+crime_data_na_filter <- na.omit(crime_data_filter)
+
+```
+
+## NYC Crime 
+###1. Which is most crime prone borough and neighborhood? 
+As we can see, Central Brooklyn and Chealsea and Clinton neighborhoods are the most crime prone. Manhattan and Brooklyn come out to be most crime prone boroughs.
+```{r message=FALSE, warning=FALSE}
+#The following zipcode and lat long mapping has  been taken from https://rpubs.com/talham/236275
+
+# read the nyc data
+nyc_crime_zips <- read.csv("data/nyc_crime_zips.csv", stringsAsFactors = FALSE)
+
+# agrregate the crime data by zip code
+#nyc_crime_zips<-aggregate(OFNS_DESC ~ postal_code, nyc_crime_zips, length)
+
+nyc_crime_neighborhoods <- merge(nyc_crime_zips, zipcode, by.x='postal_code_new', by.y='Zipcode')
+
+crime_total <- nyc_crime_neighborhoods %>% group_by (Borough, Neighborhood)%>%
+  count(sort = TRUE)
+
+crime_overall <- nyc_crime_neighborhoods %>% count(sort = TRUE)
+  
+crime_total$crime_index <- (100*crime_total$n/crime_overall$n)
+
+crimeplot <- ggplot(crime_total, aes(x= reorder(Neighborhood, -n), y=n)) + 
+  geom_point(size=4.5, aes(color= Borough) )+ 
+  geom_segment(aes(x=Neighborhood, 
+                   xend=Neighborhood, 
+                   y=0, 
+                   yend=n)) + facet_wrap(~Borough, nrow = 1, scales = "free_x") +   scale_color_manual(values = c("#43a2ca", "#31a354", "#f03b20", "#fdae6b","#8856a7")) +
+  xlab("") + 
+  ylab("Total number of Crimes") +
+  ggtitle("Crime distribution per Borough") +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),axis.text.x = element_text(angle=90, size=rel(0.8), hjust=1))
+  
+crimeplot
+```
+
+###2. What time most crimes occur? 
+This visualization depicts crime count on an hourly frequency for each Borough across years.An important insight, the crime count takes peak from 3 pm to 5 pm which has the high counts for road accidents. 
+```{r message=FALSE, warning=FALSE}
+
+crime_data_na_filter$Time <- substr(crime_data_na_filter$CMPLNT_FR_TM,1,2)
+crime_data_time <- crime_data_na_filter %>% group_by(BORO_NM, year, Time) %>%
+  summarise(count = n())
+
+
+plot_crimetime <- ggplot(data=crime_data_time, aes(x=Time, y=count, group=BORO_NM)) +
+  geom_line(aes(color=BORO_NM), size=1.2) + theme_bw() + theme(axis.text.x = element_text(angle = 90, hjust = 1)) + ggtitle("CRIME TIME ANALYSIS") + labs(title="Crime Vs Time")  + facet_wrap( ~year)
+  
+plot_crimetime
+```
+
+###3. Which areas/ neighborhoods have highest crime counts and are crime prone?
+Central Brooklyn comes to be one of the top crime prone areas in the city
+```{r message=FALSE, warning=FALSE}
+crime_data_type <- crime_data_na_filter %>% group_by(BORO_NM, year, LAW_CAT_CD) %>% summarise(count = n(), sort=TRUE)
+  
+plot_crimetype <- ggplot(data=crime_data_type, aes(x=BORO_NM, y=count, fill= LAW_CAT_CD)) + geom_bar(stat="identity", position = 'dodge') + theme_bw() + theme(axis.text.x = element_text(angle = 90, hjust = 1)) + labs(title="Crime Vs Crime Type")  + facet_wrap( ~year) + xlab("Legal Crime Type") + ylab("Crime Count")
+plot_crimetype
+```
+
+###4. Crime Distribution Map showing Neighborhood's crime density by zipcodes
+```{r message=FALSE, warning=FALSE}
+s1 <- geojson_read("data/nyu_2451_34509-geojson.json", what = "sp", string)
+s1@data <- left_join(s1@data %>% mutate(postal_code = as.numeric(as.character(zcta))),
+                      nyc_crime_neighborhoods %>%
+                        group_by(postal_code) %>%
+                        summarize(Num_of_Crimes = n()),
+                      by = "postal_code")
+
+s_labels1 <- paste("<b>Zip Code:</b>",s1$postal_code,"<br/>",
+                    "<b>No. of Crimes:</b>", s1$Num_of_Crimes,"<br/>")
+
+crime_map <- leaflet(nyc_crime_neighborhoods, options = leafletOptions(minZoom = 10)) %>%
+  addTiles(paste0("https://{s}.tile.thunderforest.com/pioneer/{z}/{x}/{y}.png?",
+                  "apikey=", Sys.getenv("THUNDERFOREST_API_KEY")),
+           options = tileOptions(opacity = 1), group = "Base") %>%
+  setView(-73.997103, 40.731030, zoom = 11) %>%
+  addPolygons(data = s1, stroke = TRUE, smoothFactor = 0.2,
+              weight=1, color='#333333', opacity=1,
+              fillColor = ~colorQuantile("RdYlGn", Num_of_Crimes, reverse = TRUE)(Num_of_Crimes), 
+              fillOpacity = 0.5,
+              popup = s_labels1) %>%
+  addLegend("bottomright",
+            pal = colorNumeric("RdYlGn", s1$Num_of_Crimes, reverse = TRUE), 
+            values = ~s1$Num_of_Crimes,
+            title = "Num of Crimes",
+            opacity = 1)
+
+crime_map
+```
+
+###5. Which crime types or offenses are prominent in the respective Boroughs?
+As we see, Petite larceny and Harrasment 2 types of offences are most prominent across the city and especially in Brooklyn and Manhattan
+```{r message=FALSE, warning=FALSE}
+
+theme_set(theme_classic())
+
+crime_type <- crime_data_na_filter %>% group_by (BORO_NM, OFNS_DESC)%>%
+  count(sort = TRUE)
+
+crime_type_filter <- crime_type[ which( crime_type$OFNS_DESC=='PETIT LARCENY' | crime_type$OFNS_DESC=='GRAND LARCENY' | crime_type$OFNS_DESC=='CRIMINAL MISCHIEF & RELATED OF' | crime_type$OFNS_DESC=='FELONY ASSAULT' | crime_type$OFNS_DESC=='ROBBERY'  | crime_type$OFNS_DESC=='BURGLARY' | crime_type$OFNS_DESC=='DANGEROUS DRUGS' | crime_type$OFNS_DESC=='DANGEROUS WEAPONS' | crime_type$OFNS_DESC=='HARRASSMENT 2' | crime_type$OFNS_DESC=='ASSAULT 3 & RELATED OFFENSES' | crime_type$OFNS_DESC=='FORGERY' | crime_type$OFNS_DESC=='VEHICLE AND TRAFFIC LAWS' | crime_type$OFNS_DESC=='INTOXICATED & IMPAIRED DRIVING' | crime_type$OFNS_DESC=='THEFT-FRAUD'),]
+colnames(crime_type_filter)[3] <- "crime_count"
+
+plot_crimeheatmap <- ggplot(crime_type_filter, aes(BORO_NM, OFNS_DESC)) + geom_tile(aes(fill = crime_count),colour = "white") + scale_fill_gradient(low = "white", high = "red") + theme_bw() + theme(axis.text.x = element_text(angle = 90, hjust = 1)) + labs(title="Crime Type Distribution Across Boroughs") + xlab("Borough") + ylab("Offense Type") 
+plot_crimeheatmap
+```
+
+## Neighborhood Hygiene Complains
+###1.What is the average Response Time in different boroughs over the years?
+We calculate Response Time from the difference of Created Date and Closed Date.
+```{r message=FALSE, warning=FALSE}
+
+service_requests$CreatedDate <- as.POSIXct(service_requests$CreatedDate, format="%m/%d/%Y %I:%M:%S %p", tz="EST")
+
+service_requests$ClosedDate <- as.POSIXct(service_requests$ClosedDate, format="%m/%d/%Y %I:%M:%S %p", tz="EST")
+
+service_requests$ResponseTime <- difftime(service_requests$ClosedDate, service_requests$CreatedDate, units = "hours")
+
+service_requests$year <- substr(service_requests$CreatedDate, 1, 4)
+service_requests$year <- as.numeric(as.character(service_requests$year))
+service_requests$month <- substr(service_requests$CreatedDate, 6, 7)
+
+years <- c("2010", "2011", "2012", "2013", "2014", "2015", "2016", "2017")
+
+service_requests_n <- merge(service_requests, zipcode, by.x="IncidentZip", by.y="Zipcode")
+
+group_intital <- service_requests_n %>%
+  group_by(Borough, Neighborhood) %>%
+  summarise(Total_Number_of_Complaints = n(), 
+            Hygiene_Index = ((Total_Number_of_Complaints/nrow(service_requests_n)) * 100)) %>%
+  arrange(Hygiene_Index)
+
+service_requests_1 <- filter(service_requests_n, year %in% years)
+
+service_requests_1 <- service_requests_n %>% drop_na(ClosedDate)
+
+service_requests_1 <- filter(service_requests_n, ClosedDate >= CreatedDate)
+
+group_1a <- service_requests_1 %>%
+  group_by(Borough, year) %>%
+  summarise(ResponseTime = mean(ResponseTime)) %>%
+  arrange(ResponseTime)
+
+group_1b <- service_requests_1 %>%
+  group_by(Borough) %>%
+  summarise(ResponseTime = mean(ResponseTime)) %>%
+  arrange(ResponseTime)
+
+group_1c <- service_requests_1 %>%
+  group_by(ComplaintType) %>%
+  summarise(ResponseTime = mean(ResponseTime)) %>%
+  arrange(ResponseTime)
+
+group_1b$Borough <- factor(group_1b$Borough, levels = group_1b$Borough)
+
+group_1c$ComplaintType <- factor(group_1c$ComplaintType, levels = group_1c$ComplaintType)
+
+g_1a <- ggplot(data=group_1a, aes(x=year, y=ResponseTime, fill = Borough))+ geom_bar(stat = "identity")+
+ylab("Response Time in Hours")+
+xlab("Year")+
+ggtitle("Plot of Response Time over the years")
+
+g_1a
+
+```
+
+### Plot of Response Time by Boroughs
+Manhattan unsuprisingly has the worst response times over the years.
+```{r message=FALSE, warning=FALSE}
+g_1b <- ggplot(data=group_1b, aes(x=Borough, y=ResponseTime)) +
+  geom_bar(stat = "identity", width = 0.5, fill = "blue") +
+  labs(title = "Plot of Response Time by Boroughs",
+   x = "Borough", y = "Response Time in Hours") +
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 10))
+
+g_1b
+```
+
+```{r message=FALSE, warning=FALSE}
+
+g_1c <- ggplot(data=group_1c, aes(x = ComplaintType, y = ResponseTime)) + 
+  geom_bar(stat = "identity") + coord_flip() +
+  scale_colour_gradient(low = "green", high = "red")+
+  ylab("Response Time")+
+  xlab("")+
+  ggtitle("Plot of Response Times for different complaint types")
+  
+g_1c
+```
+
+###2. Visualization of total complaints over months
+We observe that summer months have had highest number of complaints over the years
+```{r message=FALSE, warning=FALSE}
+
+group_time <- service_requests_1 %>%
+  group_by(Borough, year, month) %>%
+  summarise(Total_Number_of_Complaints = n()) %>%
+  arrange(Total_Number_of_Complaints)
+plot_incident_time <- ggplot(data=group_time, aes(x=month, y=Total_Number_of_Complaints, group=Borough)) + geom_line(aes(color=Borough), size=0.8) + theme_bw() + theme(axis.text.x = element_text(angle = 90, hjust = 0.8)) + ggtitle("TOTAL COMPLAINTS BY MONTHS")  + facet_wrap(~year)
+plot_incident_time
+```
+
+###3. Visualization of total complaints of rodents over months
+As we observe with the previous data, suprisingly summer months have had highest number of complaints about rodents.
+```{r message=FALSE, warning=FALSE}
+
+service_requests_1a <- filter(service_requests_1, ComplaintType == "Rodent")
+
+group_time <- service_requests_1a %>%
+  group_by(Borough, month) %>%
+  summarise(Total_Number_of_Complaints = n(), 
+            ) %>%
+  arrange(Total_Number_of_Complaints)
+
+plot_incident_time1 <- ggplot(data=group_time, aes(x=month, y=Total_Number_of_Complaints, group=Borough)) + geom_line(aes(color=Borough), size=0.8) + theme_bw() + theme(axis.text.x = element_text(angle = 90, hjust = 0.8)) + ggtitle("TOTAL COMPLAINTS ABOUT RODENTS OVER MONTHS")
+plot_incident_time1
+```
+
+###4. Visualize Best to Worst NYC Neighborhoods
+```{r message=FALSE, warning=FALSE}
+
+service_requests_n_zip <- service_requests_n %>% drop_na(IncidentZip)
+
+s2 <- geojson_read("data/nyu_2451_34509-geojson.json", what = "sp", string)
+s2@data <- left_join(s@data %>% mutate(IncidentZip = as.numeric(as.character(zcta))),
+                      service_requests_n_zip %>%
+                        group_by(IncidentZip) %>%
+                        summarize(Total_Number_of_Complaints = n()),
+                      by = "IncidentZip")
+
+s_labels2 <- paste("<b>Zip Code:</b>",s2$IncidentZip,"<br/>",
+                  "<b>Total number of Complaints:</b>", s2$Total_Number_of_Complaints,"<br/>")
+
+map_final <- leaflet(service_requests_n_zip, options = leafletOptions(minZoom = 10)) %>%
+  addTiles(paste0("https://{s}.tile.thunderforest.com/pioneer/{z}/{x}/{y}.png?",
+                  "apikey=", Sys.getenv("THUNDERFOREST_API_KEY")),
+           options = tileOptions(opacity = 1), group = "Base") %>%
+  setView(-73.997103, 40.731030, zoom = 11) %>%
+  addPolygons(data = s2, stroke = TRUE, smoothFactor = 0.2,
+              weight=1, color='#333333', opacity=1,
+              fillColor = ~colorQuantile("RdYlGn", Total_Number_of_Complaints, reverse = TRUE)(Total_Number_of_Complaints), 
+              fillOpacity = 0.5,
+              popup = s_labels2
+              ) %>%
+  addLegend("topleft",
+            pal = colorNumeric("RdYlGn", s2$Total_Number_of_Complaints, reverse = TRUE), 
+            values = ~s2$Total_Number_of_Complaints,
+            title = "Total number of Complaints",
+            labFormat = labelFormat(suffix = "s"),
+            opacity = 1)
+
+map_final
+
+```
+
+## Basic Amenities 
+###1. Schools in NYC boroughs
+Staten Island has the least number of different types of schools.
+```{r message=FALSE, warning=FALSE}
+
+school <- school@data
+
+names(zipcode)[names(zipcode) == 'Zipcode'] <- 'ZIPCODE'
+
+names(hospitals)[names(hospitals) == 'Postcode'] <- 'ZIPCODE'
+
+names(school)[names(school) == 'ZIP'] <- 'ZIPCODE'
+
+names(mta)[names(mta) == 'postal_code'] <- 'ZIPCODE'
+
+eat <- merge(restaurants,zipcode,by="ZIPCODE")
+health <- merge(hospitals,zipcode,by="ZIPCODE")
+study <- merge(school,zipcode,by="ZIPCODE")
+subway<- merge(mta,zipcode,by="ZIPCODE")
+
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+#index:
+
+#1) Restaurants: 42
+eat_index<- eat%>% dplyr::group_by(Neighborhood,Borough)%>% dplyr::summarise(n=n())
+eat_index<-eat_index[order(-eat_index$n),]
+v1<- sum(eat_index$n)
+eat_index$eat_index<- (eat_index$n/v1)*100
+
+#2) Health 27
+health_index<- health%>% dplyr::group_by(Neighborhood,Borough.y)%>% dplyr::summarise(n=n())
+health_index<-health_index[order(-health_index$n),]
+v2<- sum(health_index$n)
+health_index$health_index<- (health_index$n/v2)*100
+
+names(health_index)[names(health_index) == 'Borough.y'] <- 'Borough'
+
+#Study 42
+study_index<- study %>% group_by(Neighborhood,Borough) %>% summarise(n=n())
+study_index<-study_index[order(-study_index$n),]
+v3<- sum(study_index$n)
+study_index$study_index<- (study_index$n/v3)*100
+
+#Subway 37
+subway_index<- subway%>% dplyr::group_by(Neighborhood,Borough)%>% dplyr::summarise(n=n())
+subway_index<-subway_index[order(-subway_index$n),]
+v4<- sum(subway_index$n)
+subway_index$subway_index<- (subway_index$n/v4)*100
+
+#merging index datasets:
+
+merge1<- merge(eat_index, study_index, by="Neighborhood", all.x=TRUE)
+
+merge2<- merge(merge1,subway_index, by="Neighborhood", all.x=TRUE)
+
+merge3<- merge(merge2,health_index, by="Neighborhood", all.x=TRUE)
+
+
+Index_Table <- merge3[,c("Neighborhood", "Borough.x","eat_index","study_index","subway_index","health_index")]
+
+names(Index_Table)[names(Index_Table) == 'Borough.x'] <- 'Borough'
+
+Index_Table[is.na(Index_Table)] <- 0
+
+Index_Table$Happiness_Index <-0.3*(Index_Table$subway_index)+ 0.3*(Index_Table$study_index)+ 0.2*(Index_Table$health_index)+0.2*(Index_Table$eat_index)
+
+Index_Table<-Index_Table[order(-Index_Table$Happiness_Index),]
+
+
+Happiness_Table<- Index_Table[,c("Borough","Neighborhood","eat_index","study_index","subway_index","health_index","Happiness_Index")]
+
+
+# study
+study_total<- study%>% dplyr::group_by(SCH_TYPE,Borough,Neighborhood)%>% dplyr::summarise(n=n())
+
+#top elementary:
+study_total_1<- filter(study_total,SCH_TYPE=="Elementary")
+#bronx
+study_total_bx<- filter(study_total_1,Borough=="Bronx")
+study_total_bx<-head(study_total_bx[order(-study_total_bx$n),], 1)
+#brooklyn
+study_total_br<- filter(study_total_1,Borough=="Brooklyn")
+study_total_br<-head(study_total_br[order(-study_total_br$n),], 1)
+#manhattan
+study_total_man<- filter(study_total_1,Borough=="Manhattan")
+study_total_man<-head(study_total_man[order(-study_total_man$n),], 1)
+
+#Queens
+study_total_qu<- filter(study_total_1,Borough=="Queens")
+study_total_qu<-head(study_total_qu[order(-study_total_qu$n),], 1)
+
+#Staten Island
+study_total_si<- filter(study_total_1,Borough=="Staten Island")
+study_total_si<-head(study_total_si[order(-study_total_si$n),], 1)
+
+top_elementary<- rbind(study_total_bx,study_total_br,study_total_man,study_total_qu,study_total_si)
+
+#top Junior High  :
+study_total_2<-filter(study_total,SCH_TYPE=="Junior High-Intermediate-Middle")
+study_total_2$SCH_TYPE <- substr(study_total_2$SCH_TYPE, 1, 11)
+
+#bronx
+study_total_bx<- filter(study_total_2,Borough=="Bronx")
+study_total_bx<-head(study_total_bx[order(-study_total_bx$n),], 1)
+#brooklyn
+study_total_br<- filter(study_total_2,Borough=="Brooklyn")
+study_total_br<-head(study_total_br[order(-study_total_br$n),], 1)
+#manhattan
+study_total_man<- filter(study_total_2,Borough=="Manhattan")
+study_total_man<-head(study_total_man[order(-study_total_man$n),], 1)
+
+#Queens
+study_total_qu<- filter(study_total_2,Borough=="Queens")
+study_total_qu<-head(study_total_qu[order(-study_total_qu$n),], 1)
+
+#Staten Island
+study_total_si<- filter(study_total_2,Borough=="Staten Island")
+study_total_si<-head(study_total_si[order(-study_total_si$n),], 1)
+
+top_juniorhigh<- rbind(study_total_bx,study_total_br,study_total_man,study_total_qu,study_total_si)
+
+#top High School
+study_total_3<-filter(study_total,SCH_TYPE=="High school")
+
+
+#bronx
+study_total_bx<- filter(study_total_3,Borough=="Bronx")
+study_total_bx<-head(study_total_bx[order(-study_total_bx$n),], 1)
+#brooklyn
+study_total_br<- filter(study_total_3,Borough=="Brooklyn")
+study_total_br<-head(study_total_br[order(-study_total_br$n),], 1)
+#manhattan
+study_total_man<- filter(study_total_3,Borough=="Manhattan")
+study_total_man<-head(study_total_man[order(-study_total_man$n),], 1)
+
+#Queens
+study_total_qu<- filter(study_total_3,Borough=="Queens")
+study_total_qu<-head(study_total_qu[order(-study_total_qu$n),], 1)
+
+#Staten Island
+study_total_si<- filter(study_total_3,Borough=="Staten Island")
+study_total_si<-head(study_total_si[order(-study_total_si$n),], 1)
+
+top_highschool<- rbind(study_total_bx,study_total_br,study_total_man,study_total_qu,study_total_si)
+
+
+#final top schools according to the boroughs 
+study_final<- rbind(top_elementary,top_juniorhigh,top_highschool)
+
+
+ggplot(study_final, aes(x = reorder(Neighborhood, -n), y = n, color = SCH_TYPE,shape= SCH_TYPE)) + 
+  geom_point(size=5) +
+  facet_wrap(~Borough,nrow = 1, scales = "free_x")+ theme_minimal()+
+  labs(title = "Neighborhoods in each borough with highest no. of schools",y = "No. of Schools", x = "")+theme(axis.text.x = element_text(angle=90, size=rel(0.8), hjust=1))+scale_color_manual(values=c("#FF6A80", "#E69F00", "#56B4E9"))
+```
+
+###2. Hospitals in NYC boroughs
+Every borough has a Child Health Center
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+health_total<- health%>% dplyr::group_by(Facility.Type, Borough.x)%>% dplyr::summarise(n=n())
+
+ggplot(health_total, aes(x=n, y=Borough.x, fill=Facility.Type)) +geom_tile()+theme_minimal()+ labs(title = "Types of Health Facilities available in each borough",y = "", x = "Number of Health Facility")+scale_fill_manual(values=c("#3399ff", "#FF5A5A", "#333333","#cccccc"))
+```
+
+###3. Restaurants in NYC boroughs
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+eat_cuisine<- eat%>% dplyr::group_by(CUISINE.DESCRIPTION,Borough)%>% dplyr::summarise(n=n())
+
+cuisine<- c("Afghan","African","Asian","Australian","Bangladeshi","Brazilian","Caribbean","Continental","Eastern European","Egyptian","Ethiopian","Filipino","French","German","Greek","Hawaiian","Indian","Indonesian","Iranian","Irish","Italian","Japanese","Jewish/Kosher","Korean","Mediterranean","Mexican","Middle Eastern","Moroccan","Pakistani","Peruvian","Polish","Portuguese","Russian","Spanish","Thai","Turkish")
+eat_cuisine_final <- filter(eat_cuisine, CUISINE.DESCRIPTION %in% cuisine)
+
+
+eat_bx<- filter(eat_cuisine_final,Borough=="Bronx")
+eat_bx1<-head(eat_bx[order(-eat_bx$n),], 5)
+
+eat_br<- filter(eat_cuisine_final,Borough=="Brooklyn")
+eat_br1<-head(eat_br[order(-eat_br$n),], 5)
+
+eat_man<- filter(eat_cuisine_final,Borough=="Manhattan")
+eat_man1<-head(eat_man[order(-eat_man$n),], 5)
+
+eat_qu<- filter(eat_cuisine_final,Borough=="Queens")
+eat_qu1<-head(eat_qu[order(-eat_qu$n),], 5)
+
+eat_si<- filter(eat_cuisine_final,Borough=="Staten Island")
+eat_si1<-head(eat_si[order(-eat_si$n),], 5)
+
+eat_borough<- rbind(eat_bx,eat_br,eat_man,eat_qu,eat_si)
+eat_borough1<- rbind(eat_bx1,eat_br1,eat_man1,eat_qu1,eat_si1)
+
+names(eat_bx)[names(eat_bx) == 'n'] <- 'Bronx'
+eat_bx_f<- subset(eat_bx, select = c(CUISINE.DESCRIPTION, Bronx))
+
+names(eat_br)[names(eat_br) == 'n'] <- 'Brooklyn'
+eat_br_f<- subset(eat_br, select = c(CUISINE.DESCRIPTION, Brooklyn))
+
+names(eat_man)[names(eat_man) == 'n'] <- 'Manhattan'
+eat_man_f<- subset(eat_man, select = c(CUISINE.DESCRIPTION, Manhattan))
+
+names(eat_qu)[names(eat_qu) == 'n'] <- 'Queens'
+eat_qu_f<- subset(eat_qu, select = c(CUISINE.DESCRIPTION, Queens))
+
+names(eat_si)[names(eat_si) == 'n'] <- 'Staten Island'
+eat_si_f <- subset(eat_si, select = -c(Borough))
+munch <- merge(eat_br_f,eat_bx_f,by="CUISINE.DESCRIPTION")
+munch1<- merge(munch,eat_man_f,by="CUISINE.DESCRIPTION")
+
+munch2<-merge(munch1,eat_qu_f,by="CUISINE.DESCRIPTION")
+
+munch_final<-merge(munch2,eat_si_f,by="CUISINE.DESCRIPTION")
+
+eat_borough1<- rbind(eat_bx1,eat_br1,eat_man1,eat_qu1,eat_si1)
+
+
+#tree map
+library(treemapify)
+ggplot(eat_borough1, aes(area = n, fill = Borough , label = CUISINE.DESCRIPTION, subgroup = Borough)) + geom_treemap() + 
+  geom_treemap_subgroup_text(place = "centre", grow =T, alpha = 1, colour = "white", fontface = "italic", min.size = 1) +geom_treemap_text(colour = "black", place = "topleft", reflow = T, min.size = 0) +labs(title = "",
+    caption = "")+scale_fill_manual(values=c("#258039", "#F5BE41", "#31A9B8","#CF3721","#990000"))
+
+```
+
+###4. MTA train connectivity in each borough
+Manhattan is the most well connected borough.
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+#MTA
+
+mta_trans<- subway%>% dplyr::group_by(political,neighborhood)%>% dplyr::summarise(n=n())
+
+mta_bx<- filter(mta_trans,political=="Bronx")
+mta_bx1<-head(mta_bx[order(-mta_bx$n),], 5)
+
+
+mta_br<- filter(mta_trans,political=="Brooklyn")
+mta_br1<-head(mta_br[order(-mta_br$n),], 5)
+
+
+mta_man<- filter(mta_trans,political=="Manhattan")
+mta_man1<-head(mta_man[order(-mta_man$n),], 5)
+
+
+mta_qu<- filter(mta_trans,political=="Queens")
+mta_qu1<-head(mta_qu[order(-mta_qu$n),], 5)
+
+
+mta_si<- filter(mta_trans,political=="Staten Island")
+mta_si1<-head(mta_si[order(-mta_si$n),], 5)
+
+mta_borough<- rbind(mta_bx,mta_br,mta_man,mta_qu,mta_si)
+
+mta_top<- rbind(mta_bx1,mta_br1,mta_man1,mta_qu1,mta_si1)
+
+ggplot(mta_top, aes(x=neighborhood, y=n, fill= political) ) +
+  geom_bar( stat = "identity")+ facet_wrap(~political,nrow = 1, scales = "free_x")+theme(axis.text.x = element_text(angle=90, size=rel(0.8), hjust=1))+labs(title = "Neighborhoods with most MTA Stations",y = "", x = "")+scale_fill_manual(values=c("#006400", "#FFB6C1", "#8A2BE2","#006694","#FFA500"))
+```
+
+## Part 2: Shiny App
+
+Please click on the following link to go to the shiny App  https://nyc-neighborhoods.shinyapps.io/shinyapp/
+
